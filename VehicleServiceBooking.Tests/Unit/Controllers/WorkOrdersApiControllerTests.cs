@@ -70,7 +70,40 @@ public class WorkOrdersApiControllerTests
         var wo = await db.WorkOrders.FindAsync(woId);
         Assert.Equal(expectedCost, wo!.LaborCost);
     }
+    [Fact]
+    public async Task UpdateWorkOrder_ToCompleted_WithoutDuration_Returns400()
+    {
+    await using var factory = new TestWebApplicationFactory();
+    var (_, woId) = await SeedMechanicAndWorkOrder(factory);
 
+    var mech = factory.CreateAuthenticatedClient("Mechanic");
+
+    var response = await mech.PutAsJsonAsync($"/api/workordersapi/{woId}", new
+    {
+        Id = woId,
+        Status = (int)WorkOrderStatus.Completed
+        // pa ActualDurationMinutes
+    });
+
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+    [Fact]
+    public async Task UpdateWorkOrder_NegativeDuration_Returns400()
+    {
+    await using var factory = new TestWebApplicationFactory();
+    var (_, woId) = await SeedMechanicAndWorkOrder(factory);
+
+    var mech = factory.CreateAuthenticatedClient("Mechanic");
+
+    var response = await mech.PutAsJsonAsync($"/api/workordersapi/{woId}", new
+    {
+        Id = woId,
+        Status = (int)WorkOrderStatus.Completed,
+        ActualDurationMinutes = -10
+    });
+
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
     [Fact]
     public async Task UpdateWorkOrder_ToInProgress_SetsStartedAt()
     {
@@ -81,6 +114,7 @@ public class WorkOrdersApiControllerTests
         await mechClient.PutAsJsonAsync($"/api/workordersapi/{woId}", new
         {
             Id     = woId,
+            PartsCost = 999.00, // Tentativë për të ndryshuar PartsCost
             Status = (int)WorkOrderStatus.InProgress
         });
 
@@ -88,6 +122,9 @@ public class WorkOrdersApiControllerTests
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var wo = await db.WorkOrders.FindAsync(woId);
         Assert.NotNull(wo!.StartedAt);
+
+        // Verifiko që PartsCost nuk ka ndryshuar (mbetet 0 ose vlera fillestare)
+    Assert.NotEqual(999.00m, wo!.PartsCost);
     }
 
     [Fact]
@@ -109,7 +146,48 @@ public class WorkOrdersApiControllerTests
         var wo = await db.WorkOrders.FindAsync(woId);
         Assert.NotNull(wo!.CompletedAt);
     }
+    [Fact]
+    public async Task UpdateWorkOrder_InvalidStatusTransition_ReturnsBadRequest()
+   {
+    await using var factory = new TestWebApplicationFactory();
 
+    // krijo WorkOrder që është already Completed
+    var (_, woId) = await SeedMechanicAndWorkOrder(
+        factory,
+        status: WorkOrderStatus.Completed
+    );
+
+    var mechClient = factory.CreateAuthenticatedClient("Mechanic");
+
+    var response = await mechClient.PutAsJsonAsync($"/api/workordersapi/{woId}", new
+    {
+        Id = woId,
+        Status = (int)WorkOrderStatus.InProgress
+    });
+
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+    [Fact]
+    public async Task Mechanic_CannotModifyPartsCost()
+   {
+    await using var factory = new TestWebApplicationFactory();
+    var (_, woId) = await SeedMechanicAndWorkOrder(factory);
+
+    var mechClient = factory.CreateAuthenticatedClient("Mechanic");
+
+    await mechClient.PutAsJsonAsync($"/api/workordersapi/{woId}", new
+    {
+        Id = woId,
+        PartsCost = 500m,
+        Status = (int)WorkOrderStatus.InProgress
+    });
+
+    using var scope = factory.CreateTestScope();
+    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    var wo = await db.WorkOrders.FindAsync(woId);
+
+    Assert.NotEqual(500m, wo!.PartsCost);
+    }
     [Fact]
     public async Task UpdateWorkOrder_AsClient_Returns403()
     {

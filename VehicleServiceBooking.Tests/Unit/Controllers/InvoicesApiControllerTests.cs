@@ -72,7 +72,27 @@ public class InvoicesApiControllerTests
         Assert.Equal(sub + tax, total);
         Assert.Equal(236m, total); // 200 + 36
     }
+    [Fact]
+    public async Task GetInvoices_AsManager_Returns200()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        var manager = factory.CreateAuthenticatedClient("Manager");
 
+        var response = await manager.GetAsync("/api/invoicesapi");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetInvoiceById_NonExistent_Returns404()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        var manager = factory.CreateAuthenticatedClient("Manager");
+
+        var response = await manager.GetAsync("/api/invoicesapi/9999");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
     [Fact]
     public async Task CreateInvoice_InvoiceNumber_FollowsFormat()
     {
@@ -87,7 +107,17 @@ public class InvoicesApiControllerTests
 
         Assert.Matches(@"^INV-\d{8}-\d{4}$", number);
     }
+    [Fact]
+    public async Task DeleteInvoice_AsClient_Returns403()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        var client = factory.CreateAuthenticatedClient("Client");
 
+        // Provojmë të fshijmë një faturë (ID 1)
+        var response = await client.DeleteAsync("/api/invoicesapi/1");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
     [Fact]
     public async Task CreateInvoice_DuplicateForSameWorkOrder_Returns400()
     {
