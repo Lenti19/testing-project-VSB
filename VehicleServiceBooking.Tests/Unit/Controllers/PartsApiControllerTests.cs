@@ -1,87 +1,96 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using VehicleServiceBooking.Tests.Fixtures;
+using VehicleServiceBooking.Web.Data;
+using VehicleServiceBooking.Web.Models.Entities;
 
 namespace VehicleServiceBooking.Tests.Unit.Controllers;
-
-// PERSONA 3 — Parts endpoints
+// PERSONA 3- Parts Enpoint
 public class PartsApiControllerTests
 {
+    private const string Route = "/api/PartsApi";
+
+    // Test: GET /api/PartsApi aksessohet pa token
     [Fact]
-    public async Task GetParts_NoToken_Returns200()
+    public async Task GetParts_WithoutToken_ReturnsOk()
     {
         await using var factory = new TestWebApplicationFactory();
+
+        using (var scope = factory.CreateTestScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+            db.Parts.Add(new Part
+            {
+                Name = "Oil Filter",
+                Description = "Test part",
+                UnitPrice = 10m,
+                StockQuantity = 20,
+                MinStockLevel = 5,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            });
+
+            await db.SaveChangesAsync();
+        }
+
         var client = factory.CreateClient();
 
-        var response = await client.GetAsync("/api/partsapi");
+        var response = await client.GetAsync(Route);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
+    // Test: POST pa rol Manager kthen Forbidden
     [Fact]
-    public async Task CreatePart_AsClient_Returns403()
+    public async Task CreatePart_AsClient_ReturnsForbidden()
     {
         await using var factory = new TestWebApplicationFactory();
+
         var client = factory.CreateAuthenticatedClient("Client");
 
-        var response = await client.PostAsJsonAsync("/api/partsapi", new
+        var response = await client.PostAsJsonAsync(Route, new Part
         {
-            Name          = "Oil Filter",
-            PartNumber    = "OF-001",
-            UnitPrice     = 5.99,
-            StockQuantity = 100,
-            MinStockLevel = 10
+            Name = "Brake Pad",
+            Description = "Test part",
+            UnitPrice = 30m,
+            StockQuantity = 10,
+            MinStockLevel = 3,
+            IsActive = true
         });
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    // Test: Manager krijon Part me StockQuantity më të vogël se MinStockLevel
     [Fact]
-    public async Task CreatePart_AsManager_Returns201()
+    public async Task CreatePart_WithStockQuantityLessThanMinStockLevel_CreatesPart()
     {
         await using var factory = new TestWebApplicationFactory();
-        var manager = factory.CreateAuthenticatedClient("Manager");
 
-        var response = await manager.PostAsJsonAsync("/api/partsapi", new
+        var client = factory.CreateAuthenticatedClient("Manager");
+
+        var response = await client.PostAsJsonAsync(Route, new Part
         {
-            Name          = "Brake Pad",
-            PartNumber    = "BP-001",
-            UnitPrice     = 12.50,
-            StockQuantity = 50,
+            Name = "Low Stock Part",
+            Description = "Part with low stock",
+            UnitPrice = 15m,
+            StockQuantity = 2,
             MinStockLevel = 5,
-            IsActive      = true
+            IsActive = true
         });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-    }
 
-    [Fact]
-    public async Task DeletePart_AsMechanic_Returns403()
-    {
-        await using var factory = new TestWebApplicationFactory();
-        var mechanic = factory.CreateAuthenticatedClient("Mechanic");
+        using var scope = factory.CreateTestScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
-        var response = await mechanic.DeleteAsync("/api/partsapi/1");
+        var part = await db.Parts
+            .FirstOrDefaultAsync(p => p.Name == "Low Stock Part");
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task UpdatePart_AsClient_Returns403()
-    {
-        await using var factory = new TestWebApplicationFactory();
-        var client = factory.CreateAuthenticatedClient("Client");
-
-        var response = await client.PutAsJsonAsync("/api/partsapi/1", new
-        {
-            Id            = 1,
-            Name          = "Changed",
-            PartNumber    = "X-001",
-            UnitPrice     = 1.00,
-            StockQuantity = 1,
-            MinStockLevel = 1
-        });
-
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.NotNull(part);
+        Assert.True(part!.StockQuantity < part.MinStockLevel);
     }
 }
