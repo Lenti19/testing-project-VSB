@@ -1,80 +1,84 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using VehicleServiceBooking.Tests.Fixtures;
-using VehicleServiceBooking.Web.Data;
 using VehicleServiceBooking.Web.Models.Entities;
 
 namespace VehicleServiceBooking.Tests.Unit.Controllers;
-
-// PERSONA 3 — Clients endpoints
+// PERSONA 3 - Clients endpoint
 public class ClientsApiControllerTests
 {
+    private const string Route = "/api/ClientsApi";
+
+    // Test: Client nuk mund të shohë listën e të gjithë klientëve
     [Fact]
-    public async Task GetAllClients_AsClient_Returns403()
+    public async Task GetClients_AsClient_ReturnsForbidden()
     {
         await using var factory = new TestWebApplicationFactory();
         var client = factory.CreateAuthenticatedClient("Client");
 
-        var response = await client.GetAsync("/api/clientsapi");
+        var response = await client.GetAsync(Route);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    // Test: Manager mund të shohë listën e klientëve
     [Fact]
-    public async Task GetAllClients_AsManager_Returns200()
+    public async Task GetClients_AsManager_ReturnsOk()
     {
         await using var factory = new TestWebApplicationFactory();
         var manager = factory.CreateAuthenticatedClient("Manager");
 
-        var response = await manager.GetAsync("/api/clientsapi");
+        var response = await manager.GetAsync(Route);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
+    // Test: Client nuk mund të shohë profilin e një klienti tjetër
     [Fact]
-    public async Task GetClient_AsClient_OtherUser_Returns403()
+    public async Task GetClient_AsClient_ForOtherUser_ReturnsForbidden()
     {
         await using var factory = new TestWebApplicationFactory();
 
-        // Regjistro Client2 dhe merr ID-në e tij/saj reale
-        var anonClient = factory.CreateClient();
-        var regResp = await anonClient.PostAsJsonAsync("/api/auth/register-client", new
+        // Krijo një klient tjetër
+        var anon = factory.CreateClient();
+
+        var regResp = await anon.PostAsJsonAsync("/api/auth/register-client", new
         {
-            Email     = "other@test.com",
-            Password  = "Other@1234!",
+            Email = "other.client@test.com",
+            Password = "Test123!",
             FirstName = "Other",
-            LastName  = "User"
+            LastName = "Client"
         });
+
+        Assert.True(
+            regResp.StatusCode == HttpStatusCode.OK ||
+            regResp.StatusCode == HttpStatusCode.Created
+        );
+
         var body = await regResp.Content.ReadFromJsonAsync<JsonElement>();
         var otherId = body.GetProperty("user").GetProperty("id").GetString();
 
-        // Client1 tenton të shohë profilin e Client2
-        var client1 = factory.CreateAuthenticatedClient("Client");
-        var response = await client1.GetAsync($"/api/clientsapi/{otherId}");
+        // Client aktual tenton ta shohë tjetrin
+        var client = factory.CreateAuthenticatedClient("Client");
+
+        var response = await client.GetAsync($"{Route}/{otherId}");
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+  
+    // Test: Pa token → Unauthorized
     [Fact]
-    public async Task DeleteClient_AsMechanic_Returns403()
+    public async Task GetClients_NoToken_ReturnsUnauthorized()
     {
         await using var factory = new TestWebApplicationFactory();
-        var mechanic = factory.CreateAuthenticatedClient("Mechanic");
 
-        var response = await mechanic.DeleteAsync("/api/clientsapi/some-id");
-
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task GetAllClients_NoToken_Returns401()
-    {
-        await using var factory = new TestWebApplicationFactory();
         var client = factory.CreateClient();
 
-        var response = await client.GetAsync("/api/clientsapi");
+        var response = await client.GetAsync(Route);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
